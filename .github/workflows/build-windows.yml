@@ -1,0 +1,30 @@
+name: Build Windows (VST3 + Standalone)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpectrumScope-VST3
+          path: build/SpectrumScope_artefacts/Release/VST3/SpectrumScope.vst3
+
+      - name: Upload Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpectrumScope-Standalone
+          path: build/SpectrumScope_artefacts/Release/Standalone/SpectrumScope.exe
