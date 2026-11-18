@@ -60,7 +60,8 @@ SpectrumScopeEditor::SpectrumScopeEditor (SpectrumScopeProcessor& p)
     setSize (1100, 727);
 
     for (auto* b : { &btnLf, &btnWeight, &btnFreeze, &btnShow, &btnHold, &btnClear, &btnDetect, &btnResponse,
-                     &navLeft, &navRight, &navUp, &navDown, &zoomIn, &zoomOut, &btnResetZoom })
+                     &navLeft, &navRight, &navUp, &navDown, &zoomIn, &zoomOut, &btnResetZoom,
+                     &btnSaveData, &btnGraphMem, &btnClearMem })
         addAndMakeVisible (*b);
 
     btnLf.getText       = [this] { return choiceText (proc, ParamIDs::lfres); };
@@ -78,6 +79,9 @@ SpectrumScopeEditor::SpectrumScopeEditor (SpectrumScopeProcessor& p)
     zoomIn.getText      = [] { return juce::String ("+"); };
     zoomOut.getText     = [] { return juce::String ("-"); };
     btnResetZoom.getText = [] { return juce::String ("RESET ZOOM"); };
+    btnSaveData.getText  = [] { return juce::String ("Save Data"); };
+    btnGraphMem.getText  = [] { return juce::String ("Graph -> Mem"); };
+    btnClearMem.getText  = [] { return juce::String ("Clear Mem"); };
 
     btnFreeze.isLit = [this] { return boolValue (ParamIDs::freeze); };
     btnHold.isLit   = [this] { return boolValue (ParamIDs::peakHold); };
@@ -98,6 +102,9 @@ SpectrumScopeEditor::SpectrumScopeEditor (SpectrumScopeProcessor& p)
     zoomIn.onClick   = [this] { zoom (0.75f); };
     zoomOut.onClick  = [this] { zoom (1.0f / 0.75f); };
     btnResetZoom.onClick = [this] { resetZoom(); };
+    btnSaveData.onClick  = [this] { saveData(); };
+    btnGraphMem.onClick  = [this] { graphToMem(); };
+    btnClearMem.onClick  = [this] { clearMem(); };
 
     rebuildFFT (14);
     startTimerHz ((int) kTimerHz);
@@ -221,6 +228,7 @@ void SpectrumScopeEditor::rebuildFFT (int order)
         curveDb[(size_t) c].assign (nb, -200.0f);
     }
     weightMode = -1; // บังคับคำนวณน้ำหนักใหม่
+    memActive = false;
 }
 
 void SpectrumScopeEditor::rebuildWeighting()
@@ -254,7 +262,7 @@ void SpectrumScopeEditor::rebuildWeighting()
     }
 }
 
-void SpectrumScopeEditor::analyse (const std::vector<float>& signal, int curve, bool useRms, float alpha, bool holdOn)
+void SpectrumScopeEditor::analyse (const std::vector<float>& signal, int powIdx, bool useRms, float alpha)
 {
     std::copy (signal.begin(), signal.end(), fftBuf.begin());
     std::fill (fftBuf.begin() + fftSize, fftBuf.end(), 0.0f);
@@ -264,10 +272,7 @@ void SpectrumScopeEditor::analyse (const std::vector<float>& signal, int curve, 
 
     const float norm = 4.0f / (float) fftSize; // ไซน์เต็มสเกลแอมพลิจูด 1.0 => 0 dB
     const int nb = fftSize / 2;
-
-    auto& sp = smoothPow[(size_t) curve];
-    auto& hd = holdDb[(size_t) curve];
-    auto& out = curveDb[(size_t) curve];
+    auto& sp = smoothPow[(size_t) powIdx];
 
     for (int k = 0; k <= nb; ++k)
     {
@@ -279,8 +284,20 @@ void SpectrumScopeEditor::analyse (const std::vector<float>& signal, int curve, 
         auto& s = sp[(size_t) k];
         s = useRms ? (alpha * s + (1.0f - alpha) * pw)
                    : juce::jmax (pw, s * alpha);
+    }
+}
 
-        const float db = 10.0f * std::log10 (juce::jmax (s, 1.0e-12f)) + weightDb[(size_t) k];
+void SpectrumScopeEditor::renderCurve (bool combine, bool holdOn)
+{
+    const int nb = fftSize / 2;
+    auto& out = curveDb[0];
+    auto& hd = holdDb[0];
+
+    for (int k = 0; k <= nb; ++k)
+    {
+        const float p = combine ? 0.5f * (smoothPow[0][(size_t) k] + smoothPow[1][(size_t) k])
+                                : smoothPow[0][(size_t) k];
+        const float db = 10.0f * std::log10 (juce::jmax (p, 1.0e-12f)) + weightDb[(size_t) k];
         out[(size_t) k] = db;
         hd[(size_t) k] = holdOn ? juce::jmax (hd[(size_t) k], db) : -200.0f;
     }
@@ -300,27 +317,73 @@ void SpectrumScopeEditor::computeSpectrum()
 
     switch (mode)
     {
-        case 0:
-            analyse (sigL, 0, useRms, alpha, holdOn);
-            analyse (sigR, 1, useRms, alpha, holdOn);
-            nCurves = 2;
+        case 0: // L+R : รวมกำลังของสองช่อง เป็นเส้นเดียว
+            analyse (sigL, 0, useRms, alpha);
+            analyse (sigR, 1, useRms, alpha);
+            renderCurve (true, holdOn);
             break;
         case 1:
-            analyse (sigL, 0, useRms, alpha, holdOn);
-            nCurves = 1;
+            analyse (sigL, 0, useRms, alpha);
+            renderCurve (false, holdOn);
             break;
         case 2:
-            analyse (sigR, 0, useRms, alpha, holdOn);
-            nCurves = 1;
+            analyse (sigR, 0, useRms, alpha);
+            renderCurve (false, holdOn);
             break;
         default:
             for (int i = 0; i < n; ++i)
                 sigA[(size_t) i] = (mode == 3) ? 0.5f * (sigL[(size_t) i] + sigR[(size_t) i])
                                                : 0.5f * (sigL[(size_t) i] - sigR[(size_t) i]);
-            analyse (sigA, 0, useRms, alpha, holdOn);
-            nCurves = 1;
+            analyse (sigA, 0, useRms, alpha);
+            renderCurve (false, holdOn);
             break;
     }
+}
+
+void SpectrumScopeEditor::graphToMem()
+{
+    memDb = curveDb[0];
+    memFftSize = fftSize;
+    memFs = fs;
+    memActive = true;
+}
+
+void SpectrumScopeEditor::clearMem()
+{
+    memActive = false;
+}
+
+void SpectrumScopeEditor::saveData()
+{
+    const bool memOk = memActive && memFftSize == fftSize && memFs == fs;
+    const int nb = fftSize / 2;
+    const double binHz = fs / (double) fftSize;
+
+    juce::String csv;
+    csv << "Frequency (Hz),Level (dB),Max (dB),Mem (dB)\n";
+    for (int k = 1; k <= nb; ++k)
+    {
+        const float hv = holdDb[0][(size_t) k];
+        csv << juce::String ((double) k * binHz, 2) << ","
+            << juce::String (curveDb[0][(size_t) k], 2) << ","
+            << (hv > -150.0f ? juce::String (hv, 2) : juce::String()) << ","
+            << (memOk ? juce::String (memDb[(size_t) k], 2) : juce::String()) << "\n";
+    }
+
+    chooser = std::make_unique<juce::FileChooser> ("Save spectrum data (CSV)",
+        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("SpectrumScope_data.csv"),
+        "*.csv");
+
+    const int flags = juce::FileBrowserComponent::saveMode
+                    | juce::FileBrowserComponent::canSelectFiles
+                    | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    chooser->launchAsync (flags, [csv] (const juce::FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (f != juce::File())
+            f.withFileExtension ("csv").replaceWithText (csv);
+    });
 }
 
 void SpectrumScopeEditor::updateScope()
@@ -503,41 +566,74 @@ void SpectrumScopeEditor::paintSpectrum (juce::Graphics& g)
                 juce::Justification::centredRight, false);
 
     // กราฟสเปกตรัม
-    juce::Graphics::ScopedSaveState ss (g);
-    g.reduceClipRegion (plotArea.toNearestInt());
-
     const bool holdOn = boolValue (ParamIDs::peakHold);
-    for (int c = 0; c < nCurves; ++c)
-    {
-        const juce::Colour col = (nCurves == 2 && c == 1) ? kOrange : kCyan;
+    const bool memShown = memActive && memFftSize == fftSize && memFs == fs;
 
-        bool ok = false;
-        float fx = 0.0f, lx = 0.0f;
+    {
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (plotArea.toNearestInt());
+
+        if (memShown)
+        {
+            bool okM = false;
+            float mf = 0.0f, ml = 0.0f;
+            auto mp = makeCurve (memDb, okM, mf, ml);
+            if (okM)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.8f));
+                g.strokePath (mp, juce::PathStrokeType (1.2f));
+            }
+        }
 
         if (holdOn)
         {
             bool okH = false;
             float hf = 0.0f, hl = 0.0f;
-            auto hp = makeCurve (holdDb[(size_t) c], okH, hf, hl);
+            auto hp = makeCurve (holdDb[0], okH, hf, hl);
             if (okH)
             {
-                g.setColour (juce::Colour (0xffffe14d).withAlpha (0.85f));
-                g.strokePath (hp, juce::PathStrokeType (1.0f));
+                g.setColour (kOrange.withAlpha (0.9f));
+                g.strokePath (hp, juce::PathStrokeType (1.2f));
             }
         }
 
-        auto path = makeCurve (curveDb[(size_t) c], ok, fx, lx);
-        if (! ok)
-            continue;
+        bool ok = false;
+        float fx = 0.0f, lx = 0.0f;
+        auto path = makeCurve (curveDb[0], ok, fx, lx);
+        if (ok)
+        {
+            juce::Path fill (path);
+            fill.lineTo (lx, plotArea.getBottom());
+            fill.lineTo (fx, plotArea.getBottom());
+            fill.closeSubPath();
+            g.setColour (kCyan.withAlpha (0.18f));
+            g.fillPath (fill);
+            g.setColour (kCyan);
+            g.strokePath (path, juce::PathStrokeType (1.6f));
+        }
+    }
 
-        juce::Path fill (path);
-        fill.lineTo (lx, plotArea.getBottom());
-        fill.lineTo (fx, plotArea.getBottom());
-        fill.closeSubPath();
-        g.setColour (col.withAlpha (0.18f));
-        g.fillPath (fill);
-        g.setColour (col);
-        g.strokePath (path, juce::PathStrokeType (1.6f));
+    // คำอธิบายกราฟ (legend)
+    {
+        float lx = plotArea.getX() + 14.0f;
+        float ly = plotArea.getY() + 10.0f * sc;
+        const float row = 20.0f * sc;
+        g.setFont (juce::jmax (9.0f, 17.0f * sc));
+
+        auto legend = [&] (juce::Colour col, const juce::String& text)
+        {
+            g.setColour (col);
+            g.fillEllipse (lx, ly + row * 0.5f - 3.0f, 6.0f, 6.0f);
+            g.drawText (text, juce::Rectangle<float> (lx + 12.0f, ly, 180.0f, row), juce::Justification::centredLeft, false);
+            ly += row;
+        };
+
+        const juce::String name = choiceText (proc, ParamIDs::show);
+        legend (kCyan, name);
+        if (holdOn)
+            legend (kOrange, "Max " + name);
+        if (memShown)
+            legend (juce::Colours::white, "Mem");
     }
 }
 
@@ -664,6 +760,13 @@ void SpectrumScopeEditor::paintMeters (juce::Graphics& g)
             g.fillRect (juce::Rectangle<float> (bx + 2.0f, yLv, barW - 4.0f, bot - yLv));
         }
 
+        if (boolValue (ParamIDs::peakHold) && meterHoldDb[(size_t) i] > -kMeterRangeDb)
+        {
+            const float yh = yOfMeterDb (meterHoldDb[(size_t) i]);
+            g.setColour (juce::Colour (0xffffe14d));
+            g.fillRect (juce::Rectangle<float> (bx + 2.0f, yh - 1.0f, barW - 4.0f, 2.0f));
+        }
+
         g.setColour (juce::Colour (0xff6a7d8c));
         g.drawRect (bar, 1.5f);
 
@@ -676,7 +779,7 @@ void SpectrumScopeEditor::paintMeters (juce::Graphics& g)
         g.setColour (kLabel);
         g.setFont (juce::jmax (9.0f, 15.0f * sc));
         const float hv = meterHoldDb[(size_t) i];
-        g.drawText (hv <= -150.0f ? juce::String::fromUTF8 ("-\xE2\x88\x9E") : juce::String (hv, 1), box,
+        g.drawText (juce::String (juce::jmax (hv, -40.0f), 1), box,
                     juce::Justification::centred, false);
     }
 }
@@ -713,8 +816,8 @@ void SpectrumScopeEditor::resized()
 {
     const float W = (float) getWidth(), H = (float) getHeight();
 
-    specArea  = { 0.009f * W, 0.009f * H, 0.786f * W, 0.502f * H };
-    navArea   = { 0.805f * W, 0.009f * H, 0.186f * W, 0.502f * H };
+    specArea  = { 0.009f * W, 0.065f * H, 0.786f * W, 0.450f * H };
+    navArea   = { 0.805f * W, 0.065f * H, 0.186f * W, 0.450f * H };
     scopeArea = { 0.009f * W, 0.535f * H, 0.565f * W, 0.455f * H };
     meterArea = { 0.800f * W, 0.535f * H, 0.192f * W, 0.455f * H };
 
@@ -725,6 +828,14 @@ void SpectrumScopeEditor::resized()
     {
         c.setBounds (juce::Rectangle<float> (x, y, w, h).toNearestInt());
     };
+
+    // แถบปุ่มด้านบน
+    {
+        const float tw = 0.14f * W, th = 0.042f * H, ty = 0.012f * H, gp = 0.01f * W;
+        setB (btnSaveData, 0.009f * W, ty, tw, th);
+        setB (btnGraphMem, 0.009f * W + tw + gp, ty, tw, th);
+        setB (btnClearMem, 0.009f * W + 2.0f * (tw + gp), ty, tw, th);
+    }
 
     controlLabels.clear();
     auto addLabel = [this] (const juce::String& t, float x, float y, float w, float h)

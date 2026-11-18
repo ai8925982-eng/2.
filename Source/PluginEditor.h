@@ -37,7 +37,11 @@ private:
     void rebuildFFT (int order);
     void rebuildWeighting();
     void computeSpectrum();
-    void analyse (const std::vector<float>& signal, int curve, bool useRms, float alpha, bool holdOn);
+    void analyse (const std::vector<float>& signal, int powIdx, bool useRms, float alpha);
+    void renderCurve (bool combine, bool holdOn);
+    void saveData();
+    void graphToMem();
+    void clearMem();
     void updateScope();
     void updateMeters();
 
@@ -83,8 +87,14 @@ private:
     std::vector<float> weightDb;
     double weightFs = 0.0;
     int weightMode = -1;
-    int nCurves = 1;
     double fs = 44100.0;
+
+    // หน่วยความจำกราฟอ้างอิง (Graph -> Mem)
+    std::vector<float> memDb;
+    bool memActive = false;
+    int memFftSize = 0;
+    double memFs = 0.0;
+    std::unique_ptr<juce::FileChooser> chooser;
 
     // สโคปเฟส
     std::vector<juce::Point<float>> scopePts;
@@ -97,6 +107,7 @@ private:
     // ปุ่ม
     PanelButton btnLf { "lf" }, btnWeight { "weight" }, btnFreeze { "freeze" }, btnShow { "show" },
                 btnHold { "hold" }, btnClear { "clear" }, btnDetect { "detect" }, btnResponse { "response" };
+    PanelButton btnSaveData { "savedata" }, btnGraphMem { "graphmem" }, btnClearMem { "clearmem" };
     PanelButton navLeft { "nl" }, navRight { "nr" }, navUp { "nu" }, navDown { "nd" },
                 zoomIn { "zi" }, zoomOut { "zo" }, btnResetZoom { "rz" };
 
