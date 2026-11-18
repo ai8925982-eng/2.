@@ -2,29 +2,52 @@ name: Build Windows (VST3 + Standalone)
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 60
+
+    # ใช้โฟลเดอร์ C:\src แทนโฟลเดอร์ workspace ของ GitHub
+    # เพื่อให้ทำงานได้แม้ชื่อ repo จะลงท้ายด้วยจุด (เช่น "2.")
+    # ซึ่ง actions/checkout บน Windows รับไม่ได้
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\
+
+    env:
+      SRC: C:\src
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        run: |
+          git clone --no-tags "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" $env:SRC
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git -C $env:SRC checkout "${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Configure
-        run: cmake -B build -A x64
+        run: |
+          cmake -S $env:SRC -B "$env:SRC\build" -A x64
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Build (Release)
-        run: cmake --build build --config Release --parallel
+        run: |
+          cmake --build "$env:SRC\build" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload VST3
         uses: actions/upload-artifact@v4
         with:
           name: SpectrumScope-VST3
-          path: build/SpectrumScope_artefacts/Release/VST3/SpectrumScope.vst3
+          path: C:\src\build\SpectrumScope_artefacts\Release\VST3\SpectrumScope.vst3
+          if-no-files-found: error
 
       - name: Upload Standalone
         uses: actions/upload-artifact@v4
         with:
           name: SpectrumScope-Standalone
-          path: build/SpectrumScope_artefacts/Release/Standalone/SpectrumScope.exe
+          path: C:\src\build\SpectrumScope_artefacts\Release\Standalone\SpectrumScope.exe
+          if-no-files-found: error
