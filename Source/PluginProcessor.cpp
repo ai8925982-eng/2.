@@ -22,8 +22,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout SpectrumScopeProcessor::crea
 
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    layout.add (std::make_unique<AudioParameterChoice> (PID { ParamIDs::lfres, 1 }, "LF Resolution",
-                                                        StringArray { "20HZ", "40HZ", "80HZ" }, 1));
+    layout.add (std::make_unique<AudioParameterChoice> (PID { ParamIDs::bands, 1 }, "Bands",
+                                                        StringArray { "1/3 OCT", "1/6 OCT", "1/12 OCT" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (PID { ParamIDs::weight, 1 }, "Weighting",
                                                         StringArray { "FLAT", "A", "C" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (PID { ParamIDs::show, 1 }, "Show",

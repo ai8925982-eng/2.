@@ -7,7 +7,7 @@
 
 namespace ParamIDs
 {
-    inline constexpr const char* lfres    = "lfres";
+    inline constexpr const char* bands    = "bands";
     inline constexpr const char* weight   = "weight";
     inline constexpr const char* show     = "show";
     inline constexpr const char* detect   = "detect";
